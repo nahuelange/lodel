@@ -145,6 +145,7 @@ class Cache_Memcache extends Cache implements Cache_Arithmetic {
 				'status'           => TRUE,
 				'instant_death'	   => TRUE,
 				'failure_callback' => array($this, '_failed_request'),
+                'max_value_size'   => 1024 * 1024,
 		);
 
 		// Add the memcache servers to the pool
@@ -159,7 +160,7 @@ class Cache_Memcache extends Cache implements Cache_Arithmetic {
 			}
 		}
 
-		// Setup the flags
+        // Setup the flags
 		$this->_flags = isset($this->_config['compressed']) ? MEMCACHE_COMPRESSED : FALSE; 
 	}
 
@@ -180,16 +181,22 @@ class Cache_Memcache extends Cache implements Cache_Arithmetic {
 	public function get($id, $default = NULL)
 	{
 		// Get the value from Memcache
-		$value = $this->_memcache->get($this->_sanitize_id($id));
+		$pages = $this->_memcache->get($this->_sanitize_id("pages_{$id}"));
 
-		// If the value wasn't found, normalise it
-		if ($value === FALSE)
+		$value = '';
+
+        for($i = 0; $i < $pages ; $i++)
+        {
+            $value .= $this->_memcache->get($this->_sanitize_id("{$id}_{$i}"));
+        }
+
+		if ($value == '')
 		{
 			$value = (NULL === $default) ? NULL : $default;
 		}
 
 		// Return the value
-		return $value;
+		return unserialize(base64_decode($value));
 	}
 
 	/**
@@ -225,8 +232,27 @@ class Cache_Memcache extends Cache implements Cache_Arithmetic {
 			$lifetime = 0;
 		}
 
+        $data = base64_encode(serialize($data));
+
+        $len = strlen($data);
+
+        $return = true;
+
+        $pages = 0;
+        for( ; $pages * $this->_config['max_value_size'] < $len ; ++$pages)
+        {
+            $return |= $this->_memcache->set(
+                $this->_sanitize_id("{$id}_{$pages}"),
+                substr($data, $pages * $this->_config['max_value_size'], $this->_config['max_value_size']),
+                $this->_flags,
+                $lifetime
+            );
+        }
+
+        $this->_memcache->set($this->_sanitize_id("pages_{$id}"), $pages, $this->_flags, $lifetime);
+
 		// Set the data to memcache
-		return $this->_memcache->set($this->_sanitize_id($id), $data, $this->_flags, $lifetime);
+		return $return;
 	}
 
 	/**
