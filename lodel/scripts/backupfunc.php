@@ -275,6 +275,7 @@ function importFromZip($archive, $accepteddirs, $acceptedexts = array (), $sqlfi
         return false;
 
     $dirs = '';
+    $sql_zip = null;
 
     $files_to_extract = array();
 
